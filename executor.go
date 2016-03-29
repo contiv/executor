@@ -31,6 +31,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os/exec"
 	"syscall"
 	"time"
@@ -120,6 +121,13 @@ func (e *Executor) String() string {
 	return fmt.Sprintf("%v (%v) (pid: %v)", e.command.Args, e.command.Path, e.PID())
 }
 
+func copyIO(out io.Writer, in io.ReadCloser) {
+retry:
+	if _, err := io.Copy(out, in); err == io.ErrShortBuffer {
+		goto retry
+	}
+}
+
 // Start starts the command in the Executor context. It returns any error upon
 // starting the process, but does not wait for it to complete. You may control
 // it in a variety of ways (see Executor for more information).
@@ -143,10 +151,10 @@ func (e *Executor) Start() error {
 
 		if e.capture {
 			e.stdoutBuf = new(bytes.Buffer)
-			go io.Copy(e.stdoutBuf, e.stdout)
+			go copyIO(e.stdoutBuf, e.stdout)
 
 			e.stderrBuf = new(bytes.Buffer)
-			go io.Copy(e.stderrBuf, e.stderr)
+			go copyIO(e.stderrBuf, e.stderr)
 		}
 	}
 
@@ -223,8 +231,10 @@ func (e *Executor) Wait(ctx context.Context) (*ExecResult, error) {
 	}
 
 	if e.capture {
-		res.Stdout = string(e.stdoutBuf.Bytes())
-		res.Stderr = string(e.stderrBuf.Bytes())
+		content, _ := ioutil.ReadAll(e.stdoutBuf)
+		res.Stdout = string(content)
+		content, _ = ioutil.ReadAll(e.stderrBuf)
+		res.Stderr = string(content)
 	}
 
 	res.Runtime = e.TimeRunning()
